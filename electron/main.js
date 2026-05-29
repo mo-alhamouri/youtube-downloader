@@ -19,14 +19,11 @@ let currentDownloadProcess = null;
 
 // Directories setup
 const userDataPath = app.getPath('userData');
-const downloadsDir = path.join(app.getPath('downloads'), 'SyncWave');
+const downloadsDir = app.getPath('downloads'); // Direct to Downloads folder
 const binDir = path.join(userDataPath, 'bin');
 const ytDlpPath = path.join(binDir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 const cookiesPath = path.join(userDataPath, 'cookies.txt');
 
-if (!fs.existsSync(downloadsDir)) {
-    fs.mkdirSync(downloadsDir, { recursive: true });
-}
 if (!fs.existsSync(binDir)) {
     fs.mkdirSync(binDir, { recursive: true });
 }
@@ -258,7 +255,10 @@ ipcMain.on('start-download', (event, url, format) => {
         ytDlpArgs.push('-f', 'bestvideo[height<=1440]+bestaudio/best[height<=1440]');
     } else if (format === '1080p') {
         ytDlpArgs.push('-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]');
+    } else if (format === '720p') {
+        ytDlpArgs.push('-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]');
     } else {
+        // Default HD
         ytDlpArgs.push('-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best');
     }
 
@@ -279,12 +279,14 @@ ipcMain.on('start-download', (event, url, format) => {
     });
 
     currentDownloadProcess.on('close', () => {
+        console.log(`[INFO] Download process closed for: ${url}`);
         mainWindow.webContents.send('download-completed', { message: 'Download finished!' });
         currentDownloadProcess = null;
     });
 
     currentDownloadProcess.on('error', (err) => {
-        mainWindow.webContents.send('download-error', { error: err.message });
+        console.error('[ERROR] Download failed:', err.message);
+        mainWindow.webContents.send('download-error', { error: `Download failed: ${err.message}` });
         currentDownloadProcess = null;
     });
 });

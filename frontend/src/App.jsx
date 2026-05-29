@@ -217,7 +217,7 @@ function App() {
         const removeCompletedListener = window.electron.onDownloadCompleted(() => {
           cleanup();
           setDownloadState('completed');
-          setDownloadMsg('Download Complete! Saved to SyncWave folder.');
+          setDownloadMsg('Download Complete! Saved to your Downloads folder.');
           
           const historyItem = {
             id: metadata.id,
@@ -265,6 +265,11 @@ function App() {
     const next = { ...selectedItemIds };
     items.forEach(item => next[item.id] = !allOn);
     setSelectedItemIds(next);
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem('syncwave_history');
   };
 
   const filteredPlaylistEntries = metadata?.isPlaylist 
@@ -324,6 +329,7 @@ function App() {
                           <option value="4k">MP4 4K Ultra-HD</option>
                           <option value="1440p">MP4 1440p QHD</option>
                           <option value="1080p">MP4 1080p Full-HD</option>
+                          <option value="720p">MP4 720p HD</option>
                         </optgroup>
                       </select>
                     </div>
@@ -342,7 +348,7 @@ function App() {
                     {filteredPlaylistEntries.map((item) => (
                       <div key={item.id} className={`playlist-row-item ${selectedItemIds[item.id] ? 'selected' : ''}`} onClick={() => toggleSelectItem(item.id)}>
                         <div className={`playlist-row-checkbox ${selectedItemIds[item.id] ? 'checked' : ''}`}></div>
-                        <span className="playlist-row-title">{item.title}</span>
+                        <span className="playlist-row-title" title={item.title}>{item.title}</span>
                         <span className="playlist-row-duration">{formatDuration(item.duration)}</span>
                       </div>
                     ))}
@@ -368,6 +374,7 @@ function App() {
                         <option value="flac">FLAC Lossless</option>
                         <option value="4k">MP4 4K</option>
                         <option value="1080p">MP4 1080p</option>
+                        <option value="720p">MP4 720p</option>
                       </select>
                     </div>
                   </div>
@@ -396,7 +403,12 @@ function App() {
       </div>
 
       <div className="glass-panel">
-        <div className="history-header">Recent Downloads</div>
+        <div className="history-header">
+          <span>Recent Downloads</span>
+          {history.length > 0 && (
+            <button onClick={clearHistory} className="clear-btn">Clear</button>
+          )}
+        </div>
         <div className="history-list">
           {history.map(item => (
             <div key={item.timestamp} className="history-item">
