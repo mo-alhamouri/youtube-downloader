@@ -83,17 +83,59 @@ function downloadStandaloneYtdlp(dest) {
 
 // Global ytDlpWrap instance variable
 let ytDlpWrap = null;
+const cookiesPath = path.join(__dirname, 'cookies.txt');
+
+// Helper to write cookies from environment variable
+function setupCookies() {
+    const cookiesBase64 = process.env.YT_COOKIES_BASE64;
+    if (cookiesBase64) {
+        try {
+            const cookiesContent = Buffer.from(cookiesBase64, 'base64').toString('utf-8');
+            fs.writeFileSync(cookiesPath, cookiesContent);
+            console.log('Successfully written cookies.txt from environment variable.');
+            return true;
+        } catch (error) {
+            console.error('Failed to decode and write cookies:', error);
+        }
+    }
+    return false;
+}
+
+// Common yt-dlp flags for better success rates
+const getCommonFlags = () => {
+    const flags = [
+        '--no-check-certificates',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        '--geo-bypass'
+    ];
+    
+    if (fs.existsSync(cookiesPath)) {
+        flags.push('--cookies', cookiesPath);
+    }
+    
+    return flags;
+};
 
 // Initialize and download yt-dlp binary
 async function initYtdlp() {
     try {
         console.log(`FFmpeg binary found at: ${ffmpeg.path}`);
+        setupCookies();
         
         if (!fs.existsSync(ytDlpPath)) {
             await downloadStandaloneYtdlp(ytDlpPath);
             console.log('Standalone yt-dlp binary downloaded successfully!');
         } else {
             console.log('yt-dlp binary already exists. Ready to use.');
+            // Try to update it to ensure we have the latest bypasses
+            try {
+                const ytDlpTemp = new YTDlpWrap(ytDlpPath);
+                console.log('Checking for yt-dlp updates...');
+                // We'll just re-download to be sure it's the absolute latest
+                await downloadStandaloneYtdlp(ytDlpPath);
+            } catch (e) {
+                console.warn('Update check failed, using existing binary');
+            }
         }
 
         // Set executable permissions on unix systems
@@ -154,7 +196,12 @@ app.get('/api/info', async (req, res) => {
         // This is extremely fast and avoids downloading massive formats/details up front
         // We use --dump-single-json to ensure we get a single JSON object even for playlists
         // Note: Some versions of yt-dlp-wrap might return an array if it fails to parse as a single object
-        const flatMetadata = await ytDlpWrap.getVideoInfo([targetUrl, '--flat-playlist', '--dump-single-json']);
+        const flatMetadata = await ytDlpWrap.getVideoInfo([
+            targetUrl, 
+            '--flat-playlist', 
+            '--dump-single-json',
+            ...getCommonFlags()
+        ]);
         
         let isPlaylist = false;
         let entries = [];
@@ -210,7 +257,10 @@ app.get('/api/info', async (req, res) => {
         }
 
         // If it's not a playlist, fetch full metadata (including streams, formats, sizes)
-        const metadata = await ytDlpWrap.getVideoInfo(videoUrl);
+        const metadata = await ytDlpWrap.getVideoInfo([
+            videoUrl,
+            ...getCommonFlags()
+        ]);
         
         // Structure only what the client needs to keep payloads lightweight
         const responseData = {
@@ -274,6 +324,7 @@ app.get('/api/download', async (req, res) => {
     if (format === 'mp3') {
         ytDlpArgs = [
             url,
+            ...getCommonFlags(),
             '-x',
             '--audio-format', 'mp3',
             '--audio-quality', '0', // Highest quality VBR
@@ -283,6 +334,7 @@ app.get('/api/download', async (req, res) => {
     } else {
         ytDlpArgs = [
             url,
+            ...getCommonFlags(),
             '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             '--merge-output-format', 'mp4',
             '--ffmpeg-location', ffmpeg.path,
