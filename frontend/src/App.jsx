@@ -101,9 +101,15 @@ function App() {
           setSelectedItemIds(selection);
         }
         
-        await new Promise(r => setTimeout(r, 300));
         setDownloadPercent(100);
+        setDownloadMsg('Analysis Complete!');
+        
+        // Short delay to show 100% before switching view
+        await new Promise(r => setTimeout(r, 600));
+        
         setMetadata(data);
+        setDownloadState('idle'); // Crucial: Reset state to hide progress bar and show settings
+        setDownloadPercent(0);
       }
     } catch (err) {
       console.error(err);
@@ -303,6 +309,18 @@ function App() {
     localStorage.removeItem('syncwave_history');
   };
 
+  const handleStopQueue = () => {
+    if (activeEventSource.current && activeEventSource.current.close) {
+      activeEventSource.current.close();
+    }
+    activeEventSource.current = 'stopped';
+    setQueueActive(false);
+    setDownloadState('idle');
+    setLoading(false);
+    setDownloadPercent(0);
+    setDownloadMsg('Process stopped by user.');
+  };
+
   const filteredPlaylistEntries = metadata?.isPlaylist 
     ? metadata.entries.filter(e => e.title.toLowerCase().includes(playlistSearch.toLowerCase()))
     : [];
@@ -429,7 +447,7 @@ function App() {
                 </div>
                 <div className="progress-bar-bg"><div className="progress-bar-fill" style={{ width: `${downloadPercent}%` }}></div></div>
                 <button 
-                  onClick={() => activeEventSource.current.close()} 
+                  onClick={handleStopQueue} 
                   className="stop-button"
                   disabled={downloadState === 'completed'}
                   style={{ opacity: downloadState === 'completed' ? 0.5 : 1, cursor: downloadState === 'completed' ? 'not-allowed' : 'pointer' }}
