@@ -80,19 +80,19 @@ function App() {
       if (window.electron && window.electron.getInfo) {
         // Step 1: Pre-Analysis
         setDownloadPercent(25);
-        setDownloadMsg('Securing Connection (25%)...');
+        setDownloadMsg('Securing Connection...');
         
         // Short delay to show progress
         await new Promise(r => setTimeout(r, 400));
         
         setDownloadPercent(45);
-        setDownloadMsg('Analyzing Metadata (45%)...');
+        setDownloadMsg('Analyzing Metadata...');
 
         const data = await window.electron.getInfo(url.trim());
         if (data.error) throw new Error(data.error);
         
         setDownloadPercent(85);
-        setDownloadMsg('Mapping High-Quality Streams (85%)...');
+        setDownloadMsg('Mapping High-Quality Streams...');
 
         // Auto-select all for playlists
         if (data.isPlaylist) {
@@ -161,11 +161,13 @@ function App() {
       
       const removeProgressListener = window.electron.onDownloadProgress((data) => {
         if (data.status === 'processing') {
-          setDownloadPercent(100);
+          setDownloadPercent(95);
+          setDownloadMsg(`[${index + 1}/${updatedQueue.length}] Finalizing: ${activeItem.title}`);
           updatedQueue[index].status = 'processing';
           setQueue([...updatedQueue]);
         } else {
-          setDownloadPercent(Math.floor(data.percent || 0));
+          const progress = Math.max(10, Math.floor(data.percent || 0));
+          setDownloadPercent(progress);
           setDownloadSpeed(data.speed || '');
           setDownloadEta(data.eta || '');
         }
@@ -229,7 +231,7 @@ function App() {
     } else {
       setDownloadState('started');
       setDownloadPercent(5);
-      setDownloadMsg('Initializing Engine (5%)...');
+      setDownloadMsg('Initializing Lightning-Fast Engine...');
       
       if (window.electron && window.electron.download) {
         window.electron.download(url.trim(), format);
@@ -237,8 +239,8 @@ function App() {
         const removeProgressListener = window.electron.onDownloadProgress((data) => {
           if (data.status === 'processing') {
             setDownloadState('processing');
-            setDownloadPercent(100);
-            setDownloadMsg('Finalizing File (95%)...');
+            setDownloadPercent(95);
+            setDownloadMsg('Finalizing & Encoding High-Quality File...');
           } else {
             setDownloadState('downloading');
             // Ensure we start progress from at least 10% once download starts
@@ -246,7 +248,7 @@ function App() {
             setDownloadPercent(progress);
             setDownloadSpeed(data.speed || '');
             setDownloadEta(data.eta || '');
-            setDownloadMsg(`Downloading High-Quality Stream (${progress}%)...`);
+            setDownloadMsg('Downloading Streams from YouTube...');
           }
         });
 
