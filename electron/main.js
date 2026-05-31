@@ -140,8 +140,7 @@ const getCommonFlags = () => {
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         '--geo-bypass',
         '--no-warnings',
-        '--ignore-config',
-        '--js-runtime', 'node'
+        '--ignore-config'
     ];
     if (fs.existsSync(cookiesPath)) {
         flags.push('--cookies', cookiesPath);
@@ -282,8 +281,19 @@ ipcMain.handle('get-waveform', async (event, videoUrl) => {
     }
 });
 
-ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
-    if (!ytDlpWrap) return;
+ipcMain.on('start-download', async (event, url, format, startTime, endTime) => {
+    if (!ytDlpWrap) {
+        mainWindow.webContents.send('download-error', { error: 'Engine not initialized. Please restart the app.' });
+        return;
+    }
+
+    // Double check binary exists and is executable
+    if (!fs.existsSync(ytDlpPath)) {
+        await initYtdlp();
+    }
+    if (process.platform !== 'win32') {
+        try { fs.chmodSync(ytDlpPath, '755'); } catch (e) {}
+    }
 
     const tempOutputPath = path.join(tempDownloadsDir, '%(title)s.%(ext)s');
     
@@ -376,7 +386,7 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
                 }
 
                 if (lastFilePath && fs.existsSync(lastFilePath)) {
-                    await new Promise(r => setTimeout(r, 1500)); // Safer wait
+                    await new Promise(r => setTimeout(r, 2000)); // Safer wait for file locks
                     try {
                         const fileName = path.basename(lastFilePath);
                         const destPath = path.join(finalDownloadsDir, fileName);
@@ -386,13 +396,18 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
                         mainWindow.webContents.send('download-completed', { message: 'Download Complete! Saved to your Downloads folder' });
                     } catch (moveError) {
                         console.error('[ERROR] Save failed:', moveError);
-                        mainWindow.webContents.send('download-error', { error: 'Download finished but failed to save to folder.' });
+                        mainWindow.webContents.send('download-error', { error: 'Engine finished but could not save file to Downloads. Please check permissions.' });
                     }
                 } else {
-                    mainWindow.webContents.send('download-error', { error: 'Process finished but no file was generated.' });
+                    mainWindow.webContents.send('download-error', { error: 'Process finished but no file was generated. Try a different format.' });
                 }
-            } else if (code !== 0) {
-                mainWindow.webContents.send('download-error', { error: `Download engine failed (code ${code}).` });
+            } else {
+                console.error(`[ERROR] Engine failed with code: ${code}`);
+                mainWindow.webContents.send('download-error', { 
+                    error: code === null 
+                        ? 'Download engine was interrupted. Please try again.' 
+                        : `Download failed (Engine Error ${code}).` 
+                });
             }
             currentDownloadProcess = null;
         });
