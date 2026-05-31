@@ -244,12 +244,16 @@ ipcMain.on('start-download', (event, url, format) => {
         ...getCommonFlags(), 
         '--ffmpeg-location', ffmpeg.path, 
         '-o', outputPath,
-        '--newline'
+        '--newline',
+        '--restrict-filenames', // Avoid special character issues in filenames
+        '--force-overwrites',    // Ensure we don't get stuck on existing files
     ];
 
     console.log(`[DOWNLOAD] Target URL: ${url}`);
     
-    // High Quality Formats Mapping
+    // Pro Quality Formats Mapping
+    // We favor mp4-compatible streams (h264/aac) for standard HD to avoid merge errors.
+    // For 4K/UHD, we allow the best streams but force remux to mp4.
     if (format === 'mp3' || format === 'mp3-320') {
         ytDlpArgs.push('-x', '--audio-format', 'mp3', '--audio-quality', '0'); 
     } else if (format === 'flac') {
@@ -265,11 +269,11 @@ ipcMain.on('start-download', (event, url, format) => {
     } else if (format === '1440p') {
         ytDlpArgs.push('-f', 'bestvideo[height<=1440]+bestaudio/best[height<=1440]', '--merge-output-format', 'mp4');
     } else if (format === '1080p') {
-        ytDlpArgs.push('-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', '--merge-output-format', 'mp4');
+        // For 1080p and 720p, we prefer h264 for maximum MP4 compatibility
+        ytDlpArgs.push('-f', 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best', '--merge-output-format', 'mp4');
     } else if (format === '720p') {
-        ytDlpArgs.push('-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]', '--merge-output-format', 'mp4');
+        ytDlpArgs.push('-f', 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best', '--merge-output-format', 'mp4');
     } else {
-        // Default HD
         ytDlpArgs.push('-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', '--merge-output-format', 'mp4');
     }
 
@@ -278,7 +282,6 @@ ipcMain.on('start-download', (event, url, format) => {
         currentDownloadProcess = ytDlpWrap.exec(ytDlpArgs);
 
         currentDownloadProcess.on('progress', (progress) => {
-            // console.log(`[PROGRESS] ${progress.percent}%`);
             mainWindow.webContents.send('download-progress', {
                 status: 'downloading',
                 percent: progress.percent,
@@ -289,27 +292,30 @@ ipcMain.on('start-download', (event, url, format) => {
 
         currentDownloadProcess.on('ytDlpEvent', (event, data) => {
             console.log(`[YT-DLP] ${data}`);
-            // Check for common error strings in the stream
-            if (data.toLowerCase().includes('error:')) {
-                mainWindow.webContents.send('download-error', { error: data });
-            }
-            if (data.includes('Extracting audio') || data.includes('Destination:') || data.includes('Merging formats')) {
+            
+            // Only trigger processing message for actual finalize/merge events
+            if (data.includes('Extracting audio') || data.includes('Merging formats') || data.includes('Deleting original file')) {
                 mainWindow.webContents.send('download-progress', { 
                     status: 'processing', 
-                    message: 'Finalizing and Encoding File...' 
+                    message: 'Finalizing & Encoding High-Quality File...' 
                 });
             }
         });
 
-        currentDownloadProcess.on('close', () => {
-            console.log(`[SUCCESS] Download completed: ${url}`);
-            mainWindow.webContents.send('download-completed', { message: 'Download Complete! Saved to your Downloads folder' });
+        currentDownloadProcess.on('close', (code) => {
+            if (code === 0) {
+                console.log(`[SUCCESS] Download completed: ${url}`);
+                mainWindow.webContents.send('download-completed', { message: 'Download Complete! Saved to your Downloads folder' });
+            } else {
+                console.error(`[ERROR] Process exited with code ${code}`);
+                mainWindow.webContents.send('download-error', { error: `Download engine stopped with code ${code}. Check your connection.` });
+            }
             currentDownloadProcess = null;
         });
 
         currentDownloadProcess.on('error', (err) => {
             console.error('[FATAL] Process Error:', err.message);
-            mainWindow.webContents.send('download-error', { error: `Download failed: ${err.message}` });
+            mainWindow.webContents.send('download-error', { error: `Connection lost: ${err.message}` });
             currentDownloadProcess = null;
         });
     } catch (e) {
