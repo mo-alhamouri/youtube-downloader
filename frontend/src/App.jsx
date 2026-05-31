@@ -45,6 +45,9 @@ function App() {
   const [downloadEta, setDownloadEta] = useState('');
   const [downloadMsg, setDownloadMsg] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [dragging, setDragging] = useState(null); // 'start', 'end', or null
+  
+  const spectrumRef = useRef(null);
 
   // Sync Slider to Video Preview
   const handleSeek = (time) => {
@@ -78,6 +81,36 @@ function App() {
       return () => clearInterval(interval);
     }
   }, [isPlaying, endTime]);
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const onMouseMove = (e) => {
+      if (!spectrumRef.current || !metadata) return;
+      const rect = spectrumRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const time = (x / rect.width) * metadata.duration;
+
+      if (dragging === 'start') {
+        const nextStart = Math.min(time, endTime - 0.1);
+        setStartTime(nextStart);
+        handleSeek(nextStart);
+      } else {
+        const nextEnd = Math.max(time, startTime + 0.1);
+        setEndTime(nextEnd);
+        handleSeek(nextEnd);
+      }
+    };
+
+    const onMouseUp = () => setDragging(null);
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [dragging, startTime, endTime, metadata?.duration]);
 
   // RESET UI IF FORMAT CHANGES
   useEffect(() => {
@@ -289,7 +322,7 @@ function App() {
                         </button>
                       </div>
                       
-                      <div className="spectrum-container-wide">
+                      <div className="spectrum-container-wide" ref={spectrumRef}>
                         <div className="waveform-bg">
                           {(waveform.length > 0 ? waveform : [...Array(100)]).map((val, i) => {
                             const isSelected = (i / 100) * metadata.duration >= startTime && (i / 100) * metadata.duration <= endTime;
@@ -311,31 +344,23 @@ function App() {
                             right: `${100 - (endTime / metadata.duration) * 100}%`
                           }}></div>
                           
-                          <div className="handle-container" style={{ left: `${(startTime / metadata.duration) * 100}%` }}>
+                          <div 
+                            className={`handle-container ${dragging === 'start' ? 'dragging' : ''}`} 
+                            style={{ left: `${(startTime / metadata.duration) * 100}%` }}
+                            onMouseDown={() => setDragging('start')}
+                          >
                             <div className="handle-label top">START</div>
-                            <input 
-                              type="range" min="0" max={metadata.duration} value={startTime} 
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                setStartTime(Math.min(val, endTime - 1));
-                                handleSeek(val);
-                              }}
-                              className="range-input start-handle"
-                            />
+                            <div className="handle-bar"></div>
                             <div className="handle-label bottom">{formatDuration(startTime)}</div>
                           </div>
 
-                          <div className="handle-container" style={{ left: `${(endTime / metadata.duration) * 100}%` }}>
+                          <div 
+                            className={`handle-container ${dragging === 'end' ? 'dragging' : ''}`} 
+                            style={{ left: `${(endTime / metadata.duration) * 100}%` }}
+                            onMouseDown={() => setDragging('end')}
+                          >
                             <div className="handle-label top">END</div>
-                            <input 
-                              type="range" min="0" max={metadata.duration} value={endTime} 
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                setEndTime(Math.max(val, startTime + 1));
-                                handleSeek(val);
-                              }}
-                              className="range-input end-handle"
-                            />
+                            <div className="handle-bar"></div>
                             <div className="handle-label bottom">{formatDuration(endTime)}</div>
                           </div>
                         </div>
