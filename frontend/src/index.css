@@ -257,12 +257,36 @@ body {
   to { transform: translateX(0); }
 }
 
-/* Pro Preview & Trimming */
+/* Wide Studio Trim Selector */
+.trim-section-pro-wide {
+  margin-top: 2rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.5rem;
+  border-radius: 20px;
+  border: 1px solid var(--panel-border);
+  position: relative;
+  grid-column: 1 / -1; /* Make it full width */
+}
+
+.spectrum-container-wide {
+  position: relative;
+  height: 80px; /* Taller for better precision */
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 .preview-card-pro {
-  display: grid;
-  grid-template-columns: 450px 1fr;
+  display: flex;
+  flex-direction: column; /* Changed from grid to column for wider timeline */
   gap: 2rem;
   margin-top: 2rem;
+}
+
+.video-info-content {
+  width: 100%;
 }
 
 .video-player-container {

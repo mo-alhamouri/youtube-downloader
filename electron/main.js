@@ -231,6 +231,60 @@ ipcMain.handle('get-info', async (event, videoUrl) => {
     }
 });
 
+ipcMain.handle('get-waveform', async (event, videoUrl) => {
+    if (!ytDlpWrap) return { error: 'yt-dlp not initialized' };
+    
+    try {
+        console.log(`[WAVEFORM] Generating for: ${videoUrl}`);
+        // 1. Get high-speed audio stream URL
+        const metadata = await ytDlpWrap.getVideoInfo([
+            videoUrl,
+            '-f', 'bestaudio',
+            '--get-url',
+            '--no-check-certificates',
+            '--no-warnings'
+        ]);
+        
+        const audioUrl = Array.isArray(metadata) ? metadata[0] : metadata;
+        if (!audioUrl || typeof audioUrl !== 'string') throw new Error('Could not get audio stream');
+
+        // 2. Use ffmpeg to generate 100 data points (fast)
+        const { spawn } = require('child_process');
+        const ff = spawn(ffmpeg.path, [
+            '-i', audioUrl,
+            '-ac', '1',
+            '-filter:a', 'aresample=8000',
+            '-f', 's16le',
+            '-acodec', 'pcm_s16le',
+            '-t', '600', // Limit to 10 mins for speed
+            'pipe:1'
+        ]);
+
+        return new Promise((resolve) => {
+            let samples = [];
+            ff.stdout.on('data', (chunk) => {
+                for (let i = 0; i < chunk.length; i += 4000) { // High skip for extreme speed
+                    if (i + 1 < chunk.length) {
+                      samples.push(Math.abs(chunk.readInt16LE(i)) / 32768);
+                    }
+                }
+            });
+            ff.on('close', () => {
+                // Normalize to 100 points
+                const step = Math.max(1, Math.floor(samples.length / 100));
+                const points = [];
+                for(let i=0; i<samples.length && points.length < 100; i+=step) points.push(samples[i]);
+                resolve(points);
+            });
+            // Safety timeout
+            setTimeout(() => { ff.kill(); resolve([]); }, 10000);
+        });
+    } catch (e) {
+        console.error('[WAVEFORM] Failed:', e.message);
+        return [];
+    }
+});
+
 ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
     if (!ytDlpWrap) return;
 
@@ -245,31 +299,24 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
         '--force-overwrites'
     ];
 
-    // Trimming logic (High Efficiency)
+    // Trimming
     if (startTime !== undefined && endTime !== undefined) {
-        // Format: *HH:MM:SS-HH:MM:SS
         const formatTime = (sec) => {
             const h = Math.floor(sec / 3600).toString().padStart(2, '0');
             const m = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
             const s = Math.floor(sec % 60).toString().padStart(2, '0');
             return `${h}:${m}:${s}`;
         };
-        const section = `*${formatTime(startTime)}-${formatTime(endTime)}`;
-        ytDlpArgs.push('--download-sections', section);
-        console.log(`[TRIM] clipping range: ${section}`);
+        ytDlpArgs.push('--download-sections', `*${formatTime(startTime)}-${formatTime(endTime)}`);
     }
 
-    // Quality Formats
-    if (format === 'mp3' || format === 'mp3-320') {
+    // High Quality Formats Mapping
+    if (format.includes('mp3')) {
         ytDlpArgs.push('-x', '--audio-format', 'mp3', '--audio-quality', '0'); 
-    } else if (format === 'wav') {
-        ytDlpArgs.push('-x', '--audio-format', 'wav');
     } else if (format === 'aac') {
         ytDlpArgs.push('-x', '--audio-format', 'm4a');
     } else if (format === '4k') {
         ytDlpArgs.push('-f', 'bestvideo[height<=2160]+bestaudio/best[height<=2160]', '--recode-video', 'mp4');
-    } else if (format === 'webm-4k') {
-        ytDlpArgs.push('-f', 'bestvideo[ext=webm][height<=2160]+bestaudio[ext=webm]/best[ext=webm]');
     } else if (format === '1440p') {
         ytDlpArgs.push('-f', 'bestvideo[height<=1440]+bestaudio/best[height<=1440]', '--recode-video', 'mp4');
     } else if (format === '1080p') {
@@ -281,7 +328,7 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
     }
 
     try {
-        console.log(`[EXEC] ${ytDlpArgs.join(' ')}`);
+        console.log(`[EXEC] yt-dlp ${ytDlpArgs.join(' ')}`);
         currentDownloadProcess = ytDlpWrap.exec(ytDlpArgs);
 
         let lastFilePath = null;
@@ -296,6 +343,9 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
         });
 
         currentDownloadProcess.on('ytDlpEvent', (event, data) => {
+            console.log(`[YT-DLP] ${data}`);
+            
+            // Capture the final filename
             if (data.includes('[download] Destination:') || data.includes('[VideoConvertor] Converting video to')) {
                 const parts = data.split(': ');
                 if (parts.length > 1) lastFilePath = parts[1].trim();
@@ -305,13 +355,15 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
             }
 
             if (data.includes('Extracting audio') || data.includes('Merging formats') || data.includes('Deleting original file') || data.includes('Converting video')) {
-                mainWindow.webContents.send('download-progress', { status: 'processing', message: 'Finalizing...' });
+                mainWindow.webContents.send('download-progress', { 
+                    status: 'processing', 
+                    message: 'Finalizing & Encoding High-Quality File...' 
+                });
             }
         });
 
         currentDownloadProcess.on('close', async (code) => {
             if (code === 0 && lastFilePath) {
-                // Wait a moment for file locks to release
                 await new Promise(r => setTimeout(r, 1000));
                 
                 try {
@@ -319,7 +371,6 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
                     const destPath = path.join(finalDownloadsDir, fileName);
                     
                     if (fs.existsSync(lastFilePath)) {
-                        // Use copy + unlink for cross-volume reliability
                         fs.copyFileSync(lastFilePath, destPath);
                         fs.unlinkSync(lastFilePath);
                         console.log(`[SUCCESS] File saved: ${destPath}`);
@@ -332,7 +383,7 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
                     mainWindow.webContents.send('download-error', { error: 'Failed to save final file. Check folder permissions.' });
                 }
             } else if (code !== 0) {
-                mainWindow.webContents.send('download-error', { error: `Download failed (code ${code}).` });
+                mainWindow.webContents.send('download-error', { error: `Download engine stopped with code ${code}.` });
             }
             currentDownloadProcess = null;
         });
