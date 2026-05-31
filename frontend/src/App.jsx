@@ -301,77 +301,77 @@ function App() {
                       <option value="720p">MP4 720p</option>
                     </select>
                   </div>
-
-                  {/* Wide Spectrum Trim Selector - Studio Mode */}
-                  {!isDownloading && downloadState === 'idle' && (
-                    <div className="trim-section-pro-wide">
-                      <div className="trim-header-studio">
-                        <div className="studio-badge">STUDIO CUT MODE</div>
-                        <div className="trim-time-display">
-                          <span>{formatDuration(startTime)}</span>
-                          <span className="time-divider">/</span>
-                          <span>{formatDuration(endTime)}</span>
-                        </div>
-                        <button onClick={togglePlay} className="studio-play-btn">
-                          {isPlaying ? (
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
-                          ) : (
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                          )}
-                          {isPlaying ? 'Pause' : 'Play Clip'}
-                        </button>
-                      </div>
-                      
-                      <div className="spectrum-container-wide" ref={spectrumRef}>
-                        <div className="waveform-bg">
-                          {(waveform.length > 0 ? waveform : [...Array(100)]).map((val, i) => {
-                            const isSelected = (i / 100) * metadata.duration >= startTime && (i / 100) * metadata.duration <= endTime;
-                            return (
-                              <div 
-                                key={i} 
-                                className={`wave-bar ${isSelected ? 'active' : ''}`} 
-                                style={{ 
-                                  height: waveform.length > 0 ? `${15 + val * 85}%` : `${20 + Math.random() * 40}%`
-                                }}
-                              ></div>
-                            );
-                          })}
-                        </div>
-                        
-                        <div className="range-container-studio">
-                          <div className="selection-overlay" style={{ 
-                            left: `${(startTime / metadata.duration) * 100}%`,
-                            right: `${100 - (endTime / metadata.duration) * 100}%`
-                          }}></div>
-                          
-                          <div 
-                            className={`handle-container ${dragging === 'start' ? 'dragging' : ''}`} 
-                            style={{ left: `${(startTime / metadata.duration) * 100}%` }}
-                            onMouseDown={() => setDragging('start')}
-                          >
-                            <div className="handle-label top">START</div>
-                            <div className="handle-bar"></div>
-                            <div className="handle-label bottom">{formatDuration(startTime)}</div>
-                          </div>
-
-                          <div 
-                            className={`handle-container ${dragging === 'end' ? 'dragging' : ''}`} 
-                            style={{ left: `${(endTime / metadata.duration) * 100}%` }}
-                            onMouseDown={() => setDragging('end')}
-                          >
-                            <div className="handle-label top">END</div>
-                            <div className="handle-bar"></div>
-                            <div className="handle-label bottom">{formatDuration(endTime)}</div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="trim-footer">
-                        <span>Tip: Drag handles to select the perfect part. Length: {formatDuration(endTime - startTime)}</span>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
+
+              {/* Full-Width Wide Spectrum Trim Selector */}
+              {!isDownloading && downloadState === 'idle' && (
+                <div className="trim-section-pro-wide">
+                  <div className="trim-header-studio">
+                    <div className="studio-badge">STUDIO CUT MODE</div>
+                    <div className="trim-time-display">
+                      <span>{formatDuration(startTime)}</span>
+                      <span className="time-divider">/</span>
+                      <span>{formatDuration(endTime)}</span>
+                    </div>
+                    <button onClick={togglePlay} className="studio-play-btn">
+                      {isPlaying ? (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                      ) : (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                      )}
+                      {isPlaying ? 'Pause' : 'Play Clip'}
+                    </button>
+                  </div>
+                  
+                  <div className="spectrum-container-wide" ref={spectrumRef}>
+                    <div className="waveform-bg">
+                      {(waveform.length > 0 ? waveform : [...Array(100)]).map((val, i) => {
+                        const isSelected = (i / 100) * metadata.duration >= startTime && (i / 100) * metadata.duration <= endTime;
+                        return (
+                          <div 
+                            key={i} 
+                            className={`wave-bar ${isSelected ? 'active' : ''}`} 
+                            style={{ 
+                              height: waveform.length > 0 ? `${15 + val * 85}%` : `${20 + Math.random() * 40}%`
+                            }}
+                          ></div>
+                        );
+                      })}
+                    </div>
+                    
+                    <div className="range-container-studio">
+                      <div className="selection-overlay" style={{ 
+                        left: `${(startTime / metadata.duration) * 100}%`,
+                        right: `${100 - (endTime / metadata.duration) * 100}%`
+                      }}></div>
+                      
+                      <div 
+                        className={`handle-container ${dragging === 'start' ? 'dragging' : ''}`} 
+                        style={{ left: `${(startTime / metadata.duration) * 100}%` }}
+                        onMouseDown={() => setDragging('start')}
+                      >
+                        <div className="handle-label top">START</div>
+                        <div className="handle-bar"></div>
+                        <div className="handle-label bottom">{formatDuration(startTime)}</div>
+                      </div>
+
+                      <div 
+                        className={`handle-container ${dragging === 'end' ? 'dragging' : ''}`} 
+                        style={{ left: `${(endTime / metadata.duration) * 100}%` }}
+                        onMouseDown={() => setDragging('end')}
+                      >
+                        <div className="handle-label top">END</div>
+                        <div className="handle-bar"></div>
+                        <div className="handle-label bottom">{formatDuration(endTime)}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="trim-footer">
+                    <span>Tip: Drag handles to select the perfect part. Length: {formatDuration(endTime - startTime)}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {downloadState === 'idle' && (
