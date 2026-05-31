@@ -31,6 +31,10 @@ function App() {
   const [error, setError] = useState('');
   const [format, setFormat] = useState('mp3-320'); // Studio default
   
+  // Trimming State
+  const [startTime, setStartTime] = useState(0);
+  const [endTime, setEndTime] = useState(0);
+  
   const activeEventSource = useRef(null);
   
   // Download progress states
@@ -39,7 +43,6 @@ function App() {
   const [downloadSpeed, setDownloadSpeed] = useState('');
   const [downloadEta, setDownloadEta] = useState('');
   const [downloadMsg, setDownloadMsg] = useState('');
-  const [activeFileId, setActiveFileId] = useState('');
 
   // Playlist states
   const [selectedItemIds, setSelectedItemIds] = useState({});
@@ -48,20 +51,16 @@ function App() {
   const [queueIndex, setQueueIndex] = useState(0);
   const [queueActive, setQueueActive] = useState(false);
 
-  const [history, setHistory] = useState([]);
-
   // RESET UI IF FORMAT CHANGES
   useEffect(() => {
+    setError(''); // Remove displayed error on format change
+    
     if (downloadState === 'completed' || downloadState === 'error') {
       setDownloadState('idle');
       setDownloadMsg('');
+      setDownloadPercent(0);
     }
   }, [format]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('syncwave_history');
-    if (saved) setHistory(JSON.parse(saved));
-  }, []);
 
   const handleAnalyze = async (e) => {
     e.preventDefault();
@@ -78,37 +77,33 @@ function App() {
 
     try {
       if (window.electron && window.electron.getInfo) {
-        // Step 1: Pre-Analysis
         setDownloadPercent(25);
-        setDownloadMsg('Securing Connection...');
-        
-        // Short delay to show progress
+        setDownloadMsg('Securing Connection (25%)...');
         await new Promise(r => setTimeout(r, 400));
-        
         setDownloadPercent(45);
-        setDownloadMsg('Analyzing Metadata...');
+        setDownloadMsg('Analyzing Metadata (45%)...');
 
         const data = await window.electron.getInfo(url.trim());
         if (data.error) throw new Error(data.error);
         
         setDownloadPercent(85);
-        setDownloadMsg('Mapping High-Quality Streams...');
+        setDownloadMsg('Mapping High-Quality Streams (85%)...');
 
-        // Auto-select all for playlists
         if (data.isPlaylist) {
           const selection = {};
           data.entries.forEach(item => selection[item.id] = true);
           setSelectedItemIds(selection);
+        } else {
+          setStartTime(0);
+          setEndTime(data.duration || 0);
         }
         
         setDownloadPercent(100);
         setDownloadMsg('Analysis Complete!');
-        
-        // Short delay to show 100% before switching view
         await new Promise(r => setTimeout(r, 600));
         
         setMetadata(data);
-        setDownloadState('idle'); // Crucial: Reset state to hide progress bar and show settings
+        setDownloadState('idle');
         setDownloadPercent(0);
       }
     } catch (err) {
@@ -168,8 +163,6 @@ function App() {
         } else {
           const progress = Math.max(10, Math.floor(data.percent || 0));
           setDownloadPercent(progress);
-          setDownloadSpeed(data.speed || '');
-          setDownloadEta(data.eta || '');
         }
       });
 
@@ -177,28 +170,12 @@ function App() {
         cleanup();
         updatedQueue[index].status = 'completed';
         setQueue([...updatedQueue]);
-
-        const historyItem = {
-          id: activeItem.id,
-          title: activeItem.title,
-          thumbnail: `https://i.ytimg.com/vi/${activeItem.id}/hqdefault.jpg`,
-          duration: activeItem.duration,
-          format: format,
-          date: new Date().toLocaleDateString(),
-          timestamp: Date.now()
-        };
-        
-        setHistory(prev => {
-          const next = [historyItem, ...prev];
-          localStorage.setItem('syncwave_history', JSON.stringify(next));
-          return next;
-        });
-
         setTimeout(() => processQueueItem(index + 1, updatedQueue), 800);
       });
 
       const removeErrorListener = window.electron.onDownloadError((data) => {
         cleanup();
+        setError(data.error);
         updatedQueue[index].status = 'error';
         setQueue([...updatedQueue]);
         setTimeout(() => processQueueItem(index + 1, updatedQueue), 1500);
@@ -231,10 +208,10 @@ function App() {
     } else {
       setDownloadState('started');
       setDownloadPercent(5);
-      setDownloadMsg('Initializing Lightning-Fast Engine...');
+      setDownloadMsg('Initializing Engine (5%)...');
       
       if (window.electron && window.electron.download) {
-        window.electron.download(url.trim(), format);
+        window.electron.download(url.trim(), format, startTime, endTime);
         
         const removeProgressListener = window.electron.onDownloadProgress((data) => {
           if (data.status === 'processing') {
@@ -243,11 +220,8 @@ function App() {
             setDownloadMsg('Finalizing & Encoding High-Quality File...');
           } else {
             setDownloadState('downloading');
-            // Ensure we start progress from at least 10% once download starts
             const progress = Math.max(10, Math.floor(data.percent || 0));
             setDownloadPercent(progress);
-            setDownloadSpeed(data.speed || '');
-            setDownloadEta(data.eta || '');
             setDownloadMsg('Downloading Streams from YouTube...');
           }
         });
@@ -257,21 +231,6 @@ function App() {
           setDownloadState('completed');
           setDownloadMsg('Download Complete! Saved to your Downloads folder');
           setDownloadPercent(100);
-          
-          const historyItem = {
-            id: metadata.id,
-            title: metadata.title,
-            thumbnail: metadata.thumbnail,
-            duration: metadata.duration,
-            format: format,
-            date: new Date().toLocaleDateString(),
-            timestamp: Date.now()
-          };
-          setHistory(prev => {
-            const next = [historyItem, ...prev];
-            localStorage.setItem('syncwave_history', JSON.stringify(next));
-            return next;
-          });
         });
 
         const removeErrorListener = window.electron.onDownloadError((data) => {
@@ -291,6 +250,18 @@ function App() {
     }
   };
 
+  const handleStopQueue = () => {
+    if (activeEventSource.current && activeEventSource.current.close) {
+      activeEventSource.current.close();
+    }
+    activeEventSource.current = 'stopped';
+    setQueueActive(false);
+    setDownloadState('idle');
+    setLoading(false);
+    setDownloadPercent(0);
+    setDownloadMsg('Process stopped by user.');
+  };
+
   const toggleSelectItem = (id) => {
     if (queueActive) {
       const item = queue.find(q => q.id === id);
@@ -306,29 +277,27 @@ function App() {
     setSelectedItemIds(next);
   };
 
-  const clearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem('syncwave_history');
-  };
-
-  const handleStopQueue = () => {
-    if (activeEventSource.current && activeEventSource.current.close) {
-      activeEventSource.current.close();
-    }
-    activeEventSource.current = 'stopped';
-    setQueueActive(false);
-    setDownloadState('idle');
-    setLoading(false);
-    setDownloadPercent(0);
-    setDownloadMsg('Process stopped by user.');
-  };
-
   const filteredPlaylistEntries = metadata?.isPlaylist 
     ? metadata.entries.filter(e => e.title.toLowerCase().includes(playlistSearch.toLowerCase()))
     : [];
 
+  const isDownloading = downloadState !== 'idle' && downloadState !== 'completed' && downloadState !== 'error';
+
   return (
     <div className="app-container">
+      {/* Error Notification Popover */}
+      {error && (
+        <div className="error-popover">
+          <div className="error-content">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span>{error}</span>
+          </div>
+          <button onClick={() => setError('')} className="error-close-btn">&times;</button>
+        </div>
+      )}
+
       <div className="header-section">
         <h1>SyncWave <span className="gradient-text">Downloader</span></h1>
         <p>Unmatched Quality. Universal Compatibility. Lightning Fast.</p>
@@ -343,14 +312,13 @@ function App() {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               className="url-input"
+              disabled={isDownloading || queueActive}
             />
-            <button type="submit" className="analyze-btn" disabled={loading}>
+            <button type="submit" className="analyze-btn" disabled={loading || isDownloading || queueActive}>
               {loading ? <div className="spinner"></div> : 'Analyze'}
             </button>
           </div>
         </form>
-
-        {error && <div className="alert-message alert-error">{error}</div>}
 
         {metadata && (
           <div className="settings-section">
@@ -369,10 +337,14 @@ function App() {
 
                   {!queueActive && (
                     <div className="format-grid">
-                      <select value={format} onChange={(e) => setFormat(e.target.value)} className="quality-select">
+                      <select 
+                        value={format} 
+                        onChange={(e) => setFormat(e.target.value)} 
+                        className="quality-select"
+                        disabled={isDownloading}
+                      >
                         <optgroup label="Studio Audio">
                           <option value="mp3-320">MP3 320kbps (Studio)</option>
-                          <option value="flac">FLAC Lossless</option>
                           <option value="wav">WAV Uncompressed</option>
                           <option value="aac">AAC Enhanced</option>
                         </optgroup>
@@ -420,14 +392,39 @@ function App() {
                     <div className="video-meta-row">
                       <span>{formatViews(metadata.viewCount)} views</span>
                       <span>•</span>
-                      <select value={format} onChange={(e) => setFormat(e.target.value)} className="quality-select-inline">
+                      <select 
+                        value={format} 
+                        onChange={(e) => setFormat(e.target.value)} 
+                        className="quality-select-inline"
+                        disabled={isDownloading}
+                      >
                         <option value="mp3-320">MP3 320kbps</option>
-                        <option value="flac">FLAC Lossless</option>
                         <option value="4k">MP4 4K</option>
                         <option value="1080p">MP4 1080p</option>
                         <option value="720p">MP4 720p</option>
                       </select>
                     </div>
+
+                    {/* Trim Selector */}
+                    {!isDownloading && downloadState === 'idle' && (
+                      <div className="trim-section">
+                        <div className="trim-header">
+                          <span>Clip Selection: {formatDuration(startTime)} - {formatDuration(endTime)}</span>
+                        </div>
+                        <div className="range-container">
+                          <input 
+                            type="range" min="0" max={metadata.duration} value={startTime} 
+                            onChange={(e) => setStartTime(Math.min(Number(e.target.value), endTime - 1))}
+                            className="range-input"
+                          />
+                          <input 
+                            type="range" min="0" max={metadata.duration} value={endTime} 
+                            onChange={(e) => setEndTime(Math.max(Number(e.target.value), startTime + 1))}
+                            className="range-input"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -460,26 +457,6 @@ function App() {
             )}
           </div>
         )}
-      </div>
-
-      <div className="glass-panel">
-        <div className="history-header">
-          <span>Recent Downloads</span>
-          {history.length > 0 && (
-            <button onClick={clearHistory} className="clear-btn">Clear History</button>
-          )}
-        </div>
-        <div className="history-list">
-          {history.map(item => (
-            <div key={item.timestamp} className="history-item">
-              <img src={item.thumbnail} className="history-thumbnail" alt="" />
-              <div className="history-text">
-                <span className="history-title">{item.title}</span>
-                <span className="history-meta">{item.format.toUpperCase()} • {item.date}</span>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
