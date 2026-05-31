@@ -4,8 +4,11 @@ contextBridge.exposeInMainWorld('electron', {
     // Info extraction
     getInfo: (url) => ipcRenderer.invoke('get-info', url),
     
-    // Download process
-    download: (url, format) => ipcRenderer.send('start-download', url, format),
+    // Waveform generation
+    getWaveform: (url) => ipcRenderer.invoke('get-waveform', url),
+    
+    // Download process with trim support
+    download: (url, format, startTime, endTime) => ipcRenderer.send('start-download', url, format, startTime, endTime),
     
     // Listen for progress updates
     onDownloadProgress: (callback) => {
