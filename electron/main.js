@@ -236,7 +236,6 @@ ipcMain.handle('get-waveform', async (event, videoUrl) => {
     
     try {
         console.log(`[WAVEFORM] Generating for: ${videoUrl}`);
-        // 1. Get high-speed audio stream URL
         const metadata = await ytDlpWrap.getVideoInfo([
             videoUrl,
             '-f', 'bestaudio',
@@ -248,7 +247,6 @@ ipcMain.handle('get-waveform', async (event, videoUrl) => {
         const audioUrl = Array.isArray(metadata) ? metadata[0] : metadata;
         if (!audioUrl || typeof audioUrl !== 'string') throw new Error('Could not get audio stream');
 
-        // 2. Use ffmpeg to generate 100 data points (fast)
         const { spawn } = require('child_process');
         const ff = spawn(ffmpeg.path, [
             '-i', audioUrl,
@@ -256,14 +254,12 @@ ipcMain.handle('get-waveform', async (event, videoUrl) => {
             '-filter:a', 'aresample=8000',
             '-f', 's16le',
             '-acodec', 'pcm_s16le',
-            // '-t', '600',  // REMOVED LIMIT: Now scans the entire file length
             'pipe:1'
         ]);
 
         return new Promise((resolve) => {
             let samples = [];
             ff.stdout.on('data', (chunk) => {
-                // Adjust skip based on data volume (adaptive for long files)
                 const skip = samples.length > 50000 ? 10000 : 4000;
                 for (let i = 0; i < chunk.length; i += skip) {
                     if (i + 1 < chunk.length) {
@@ -272,18 +268,12 @@ ipcMain.handle('get-waveform', async (event, videoUrl) => {
                 }
             });
             ff.on('close', () => {
-                // Normalize to exactly 100 points representing the WHOLE file
                 const step = Math.max(1, Math.floor(samples.length / 100));
                 const points = [];
-                for(let i=0; i<samples.length && points.length < 100; i+=step) {
-                    points.push(samples[i]);
-                }
-                // If we have fewer than 100 points (very short video), pad it
+                for(let i=0; i<samples.length && points.length < 100; i+=step) points.push(samples[i]);
                 while(points.length < 100) points.push(0);
-                
                 resolve(points);
             });
-            // Slightly longer safety timeout for long videos
             setTimeout(() => { ff.kill(); resolve([]); }, 15000);
         });
     } catch (e) {
@@ -304,10 +294,9 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
         '-o', tempOutputPath,
         '--newline',
         '--force-overwrites',
-        '--no-keep-video' // Ensure temp video is deleted after MP3 conversion
+        '--no-keep-video'
     ];
 
-    // Trimming
     if (startTime !== undefined && endTime !== undefined) {
         const formatTime = (sec) => {
             const h = Math.floor(sec / 3600).toString().padStart(2, '0');
@@ -318,7 +307,6 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
         ytDlpArgs.push('--download-sections', `*${formatTime(startTime)}-${formatTime(endTime)}`);
     }
 
-    // High Quality Formats Mapping
     if (format.includes('mp3')) {
         ytDlpArgs.push('-x', '--audio-format', 'mp3', '--audio-quality', '0'); 
     } else if (format === 'aac') {
@@ -353,16 +341,20 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
         currentDownloadProcess.on('ytDlpEvent', (event, data) => {
             console.log(`[YT-DLP] ${data}`);
             
-            // Capture the final filename
-            if (data.includes('[download] Destination:') || data.includes('[VideoConvertor] Converting video to')) {
-                const parts = data.split(': ');
-                if (parts.length > 1) lastFilePath = parts[1].trim();
-            } else if (data.includes('Merging formats into')) {
-                const match = data.match(/into "(.+)"/);
-                if (match) lastFilePath = match[1];
+            if (data.includes('Destination:') || data.includes('Converting video to') || data.includes('[ExtractAudio]') || data.includes('Merging formats into')) {
+                // Try to catch the filename
+                if (data.includes('into "')) {
+                    const match = data.match(/into "(.+)"/);
+                    if (match) lastFilePath = match[1];
+                } else if (data.includes(': ')) {
+                    const parts = data.split(': ');
+                    if (parts.length > 1 && parts[1].includes(tempDownloadsDir)) {
+                        lastFilePath = parts[1].trim();
+                    }
+                }
             }
 
-            if (data.includes('Extracting audio') || data.includes('Merging formats') || data.includes('Deleting original file') || data.includes('Converting video')) {
+            if (data.includes('Extracting audio') || data.includes('[ExtractAudio]') || data.includes('Merging formats') || data.includes('ffmpeg') || data.includes('Converting video')) {
                 mainWindow.webContents.send('download-progress', { 
                     status: 'processing', 
                     message: 'Finalizing & Encoding High-Quality File...' 
@@ -371,27 +363,35 @@ ipcMain.on('start-download', (event, url, format, startTime, endTime) => {
         });
 
         currentDownloadProcess.on('close', async (code) => {
-            if (code === 0 && lastFilePath) {
-                await new Promise(r => setTimeout(r, 1000));
-                
-                try {
-                    const fileName = path.basename(lastFilePath);
-                    const destPath = path.join(finalDownloadsDir, fileName);
-                    
-                    if (fs.existsSync(lastFilePath)) {
+            if (code === 0) {
+                // FALLBACK: If we missed the path, find the newest file in temp
+                if (!lastFilePath || !fs.existsSync(lastFilePath)) {
+                    const files = fs.readdirSync(tempDownloadsDir).map(f => ({
+                        name: f,
+                        path: path.join(tempDownloadsDir, f),
+                        time: fs.statSync(path.join(tempDownloadsDir, f)).mtime.getTime()
+                    })).sort((a, b) => b.time - a.time);
+                    if (files.length > 0) lastFilePath = files[0].path;
+                }
+
+                if (lastFilePath && fs.existsSync(lastFilePath)) {
+                    await new Promise(r => setTimeout(r, 1500)); // Safer wait
+                    try {
+                        const fileName = path.basename(lastFilePath);
+                        const destPath = path.join(finalDownloadsDir, fileName);
                         fs.copyFileSync(lastFilePath, destPath);
                         fs.unlinkSync(lastFilePath);
                         console.log(`[SUCCESS] File saved: ${destPath}`);
                         mainWindow.webContents.send('download-completed', { message: 'Download Complete! Saved to your Downloads folder' });
-                    } else {
-                        throw new Error('Finished file disappeared from temp folder');
+                    } catch (moveError) {
+                        console.error('[ERROR] Save failed:', moveError);
+                        mainWindow.webContents.send('download-error', { error: 'Download finished but failed to save to folder.' });
                     }
-                } catch (moveError) {
-                    console.error('[ERROR] Failed to save file:', moveError);
-                    mainWindow.webContents.send('download-error', { error: 'Failed to save final file. Check folder permissions.' });
+                } else {
+                    mainWindow.webContents.send('download-error', { error: 'Process finished but no file was generated.' });
                 }
             } else if (code !== 0) {
-                mainWindow.webContents.send('download-error', { error: `Download engine stopped with code ${code}.` });
+                mainWindow.webContents.send('download-error', { error: `Download engine failed (code ${code}).` });
             }
             currentDownloadProcess = null;
         });
